@@ -1,7 +1,11 @@
 var LibraryOpenMP = {
   
+  _omp_barrier_address: '; if (!ENVIRONMENT_IS_PTHREAD) __omp_barrier_address = allocate(1, "*i32", ALLOC_STATIC)',
+  
+  $OpenMP__deps: ['_omp_barrier_address'],
   $OpenMP: {
   	omp_num_threads: 4,
+    omp_barrier_address: 0,
     unusedWorkerPool: [],
     runningWorkers: [],
     threads: {},
@@ -74,9 +78,8 @@ var LibraryOpenMP = {
     },
 
     threadExit: function() {
-      console.log(threadInfoStruct);
       Atomics.store(HEAPU32, threadInfoStruct >> 2, 1);
-      __omp_futex_wake(5337144, 1);
+      __omp_futex_wake(threadInfoStruct, 1);
     },
 
     getNewWorker: function() {
@@ -122,7 +125,9 @@ var LibraryOpenMP = {
       threadInfoStruct: threadParams.thread_ptr,
       selfThreadId: threadid,
       stackBase: threadParams.stackBase,
-      stackSize: threadParams.stackSize   
+      stackSize: threadParams.stackSize,
+      omp_num_threads: OpenMP.omp_num_threads,
+      omp_barrier_address: OpenMP.omp_barrier_address
     });
 
   },
@@ -163,7 +168,7 @@ var LibraryOpenMP = {
     for (;;) {
       var threadStatus = Atomics.load(HEAPU32, thread_ptr >> 2);
       if (threadStatus == 1) {
-        console.log('return');
+        console.log('_omp_thread_join return');
         return; 
       }
       // if (!ENVIRONMENT_IS_PTHREAD) _emscripten_main_thread_process_queued_calls();
@@ -172,13 +177,20 @@ var LibraryOpenMP = {
   },
 
   _omp_futex_wait: function(addr, val, timeout) {
+    if (addr <= 0 || addr > HEAP8.length || addr&3 != 0) {
+      console.log('Error: __omp_futex_wait abnomal wait address ' + addr + ' threadid = ' + selfThreadId);
+    }
+
     if (ENVIRONMENT_IS_WORKER) {
-        
+      var ret = Atomics.futexWait(HEAP32, addr >> 2, val, timeout);
+      if (ret == Atomics.TIMEOUT) return -2;
+      if (ret == Atomics.NOTEQUAL) return -1;
+      if (ret == 0) return 0;
     } else {
       // main thread waiting
       var loadedVal = Atomics.load(HEAP32, addr >> 2);
       if (loadedVal != val) {
-        console.err('loadedVal != val');    
+        console.log('Error: __omp_futex_wait loadedVal != val');    
       }
       var tNow = performance.now();
       var tEnd = tNow + timeout;
@@ -210,11 +222,11 @@ var LibraryOpenMP = {
   },
 
   omp_set_num_threads: function(num_threads) {
-    OpenMP.num_threads = num_threads;
+    OpenMP.omp_num_threads = num_threads;
   },
 
   omp_get_num_threads: function() {
-  	return OpenMP.num_threads;
+  	return OpenMP.omp_num_threads;
   },
 
   omp_get_thread_num: function() {
@@ -223,18 +235,31 @@ var LibraryOpenMP = {
 
   __kmpc_fork_call__deps: ['_omp_thread_create', '_omp_thread_join', '_omp_futex_wait', '_omp_futex_wake'],
   __kmpc_fork_call: function(loc, argc, microtask, varargs) {
+    if (OpenMP.omp_barrier_address == 0) {
+        OpenMP.omp_barrier_address = __omp_barrier_address;
+    }
+    HEAP32[OpenMP.omp_barrier_addr >> 2] = 0;
     var thread_ptrs = [];
-    for (var i = 0; i < OpenMP.num_threads; i++) {
+    for (var i = 0; i < OpenMP.omp_num_threads; i++) {
       var thread_ptr = __omp_thread_create(i, argc, microtask, varargs);
       thread_ptrs.push(thread_ptr);
     }
-    for (var i = 0; i < OpenMP.num_threads; i++)
+    for (var i = 0; i < OpenMP.omp_num_threads; i++)
       __omp_thread_join(thread_ptrs.pop());
+
+    console.log(Atomics.load(HEAP32, OpenMP.omp_barrier_address >> 2));
   },
 
-  __kmpc_barrier: function(loc, global_tid) {
-  
-  
+  __kmpc_barrier: function(loc, threadid) {
+    // load the number of the thread arriving barrier
+    Atomics.add(HEAP32, OpenMP.omp_barrier_address >> 2, 1);
+    for (;;) {
+      var num = Atomics.load(HEAP32, OpenMP.omp_barrier_address >> 2);
+      if (num == OpenMP.omp_num_threads) {
+        return;
+       }
+       __omp_futex_wait(OpenMP.omp_barrier_address, num, 100);
+    }
   }
 };
 

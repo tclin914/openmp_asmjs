@@ -52,6 +52,11 @@ this.onmessage = function(e) {
       assert(STACK_BASE != 0);
       assert(STACK_MAX > STACK_BASE);
       Runtime.establishStackSpace(e.data.stackBase, e.data.stackBase + e.data.stackSize);
+
+      // OpenMP setting
+      OpenMP.omp_num_threads = e.data.omp_num_threads;
+      OpenMP.omp_barrier_address = e.data.omp_barrier_address;
+
       try {
         switch (e.data.argc) {
             case 0:
@@ -64,7 +69,7 @@ this.onmessage = function(e) {
                 
         }
       } catch (e) {
-          console.log('exception');
+          console.log('Exception: ' + e);
       }
       OpenMP.threadExit();
   
