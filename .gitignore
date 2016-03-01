@@ -1,3 +1,9 @@
 parallel/parallel.html
 parallel/parallel.js
 parallel/pthread-main.js
+parallel/parallel.ll
+
+barrier/barrier.html
+barrier/barrier.js
+barrier/pthread-main.js
+barrier/barrier.ll
