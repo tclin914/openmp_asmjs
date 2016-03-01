@@ -46,7 +46,6 @@ this.onmessage = function(e) {
       threadInfoStruct = e.data.threadInfoStruct;
       assert(threadInfoStruct);
       selfThreadId = e.data.selfThreadId;
-      assert(selfThreadId);
 
       STACK_BASE = STACKTOP = e.data.stackBase;
       STACK_MAX = STACK_BASE + e.data.stackSize;
@@ -59,7 +58,7 @@ this.onmessage = function(e) {
               asm.dynCall_vii(e.data.microtask, 1, 1);          
               break;
             case 1:
-              asm.dynCall_viii(e.data.microtask, 1, 1, e.data.varargs);
+              asm.dynCall_viii(e.data.microtask, 1, 1, HEAP32[e.data.varargs >> 2]);
               break; 
             default:
                 
@@ -68,9 +67,6 @@ this.onmessage = function(e) {
           console.log('exception');
       }
       OpenMP.threadExit();
-      // console.log(threadInfoStruct);
-      Atomics.store(HEAPU32, threadInfoStruct >> 2, 1);
-      // postMessage({cmd: 'done'});
   
   } else {
     Module['printErr']('thread-main.js received unknown command ' + e.data.cmd);

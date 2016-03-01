@@ -1,7 +1,7 @@
 var LibraryOpenMP = {
   
   $OpenMP: {
-  	num_threads: 4,
+  	omp_num_threads: 4,
     unusedWorkerPool: [],
     runningWorkers: [],
     threads: {},
@@ -36,9 +36,6 @@ var LibraryOpenMP = {
             if (numWorkersLoaded === numWorkers && onFinishedLoading) {
               onFinishedLoading();
             }
-          } else if (e.data.cmd === 'done') {
-
-            console.log('thread status = ' + HEAPU32[(5337144 >> 2) + 0]);
           } else if (e.data.cmd === 'print') {
             Module['print']('Thread ' + e.data.threadId + ': ' + e.data.text);
           } else if (e.data.cmd === 'printErr') {
@@ -78,7 +75,7 @@ var LibraryOpenMP = {
 
     threadExit: function() {
       console.log(threadInfoStruct);
-      Atomics.store(HEAPU32, 5337144 >> 2, 1);
+      Atomics.store(HEAPU32, threadInfoStruct >> 2, 1);
       __omp_futex_wake(5337144, 1);
     },
 
@@ -96,7 +93,7 @@ var LibraryOpenMP = {
     }
   },
 
-  _omp_spawn_thread: function(threadParams, argc, varargs) {
+  _omp_spawn_thread: function(threadid, threadParams, argc, varargs) {
     if (ENVIRONMENT_IS_WORKER || ENVIRONMENT_IS_PTHREAD) throw 'Internal Error! _spawn_thread() can only ever be called from main JS thread!';
 
     var worker = OpenMP.getNewWorker();
@@ -123,7 +120,7 @@ var LibraryOpenMP = {
       argc: argc, 
       varargs: varargs,
       threadInfoStruct: threadParams.thread_ptr,
-      selfThreadId: threadParams.thread_ptr,
+      selfThreadId: threadid,
       stackBase: threadParams.stackBase,
       stackSize: threadParams.stackSize   
     });
@@ -131,7 +128,7 @@ var LibraryOpenMP = {
   },
 
   _omp_thread_create__deps: ['_omp_spawn_thread'],
-  _omp_thread_create: function(argc, microtask, varargs) {
+  _omp_thread_create: function(threadid, argc, microtask, varargs) {
     if (typeof SharedArrayBuffer === 'undefined') {
       Module['printErr']('Current envrionment does not support SharedArrayBuffer, OpenMP are not availalbe!');
       return 11;
@@ -157,7 +154,7 @@ var LibraryOpenMP = {
       threadParams.cmd = 'spawnThread';
       postMessage(threadParams);
     } else {
-      __omp_spawn_thread(threadParams, argc, varargs); 
+      __omp_spawn_thread(threadid, threadParams, argc, varargs); 
       return threadInfoStruct;
     }
   },
@@ -221,14 +218,14 @@ var LibraryOpenMP = {
   },
 
   omp_get_thread_num: function() {
-    return 1;
+    return selfThreadId;
   },
 
   __kmpc_fork_call__deps: ['_omp_thread_create', '_omp_thread_join', '_omp_futex_wait', '_omp_futex_wake'],
   __kmpc_fork_call: function(loc, argc, microtask, varargs) {
     var thread_ptrs = [];
     for (var i = 0; i < OpenMP.num_threads; i++) {
-      var thread_ptr = __omp_thread_create(argc, microtask, varargs);
+      var thread_ptr = __omp_thread_create(i, argc, microtask, varargs);
       thread_ptrs.push(thread_ptr);
     }
     for (var i = 0; i < OpenMP.num_threads; i++)
