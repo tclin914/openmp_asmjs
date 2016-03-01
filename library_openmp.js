@@ -8,6 +8,17 @@ var LibraryOpenMP = {
     omp_barrier_address: 0,
     unusedWorkerPool: [],
     runningWorkers: [],
+    initMainThreadBlock: function() {
+      if (ENVIRONMENT_IS_PTHREAD) return undefined;
+      var threadInfoStruct = _malloc(216);
+      for (var i = 0; i < 216 >> 2; ++i) HEAPU32[(threadInfoStruct >> 2) + i] = 0;
+    
+      // set up thread infomation
+      Atomics.store(HEAPU32, (threadInfoStruct + 0) >> 2, 0); // threadStatus
+      Atomics.store(HEAPU32, (threadInfoStruct + 4) >> 2, 0); // threadExitCode
+
+      OpenMP.mainThreadBlock = threadInfoStruct; 
+    },
     threads: {},
     threadIdCounter: 2,
     allocateUnusedWorkers: function(numWorkers, onFinishedLoading) {
@@ -230,21 +241,40 @@ var LibraryOpenMP = {
   },
 
   omp_get_thread_num: function() {
+    if (!ENVIRONMENT_IS_PTHREAD) return 0;
     return selfThreadId;
   },
 
   __kmpc_fork_call__deps: ['_omp_thread_create', '_omp_thread_join', '_omp_futex_wait', '_omp_futex_wake'],
   __kmpc_fork_call: function(loc, argc, microtask, varargs) {
+    if (OpenMP.mainThreadBlock === undefined) {
+      OpenMP.initMainThreadBlock(); 
+    }
     if (OpenMP.omp_barrier_address == 0) {
-        OpenMP.omp_barrier_address = __omp_barrier_address;
+      OpenMP.omp_barrier_address = __omp_barrier_address;
     }
     HEAP32[OpenMP.omp_barrier_addr >> 2] = 0;
     var thread_ptrs = [];
-    for (var i = 0; i < OpenMP.omp_num_threads; i++) {
-      var thread_ptr = __omp_thread_create(i, argc, microtask, varargs);
+    for (var i = 0; i < OpenMP.omp_num_threads - 1; i++) {
+      var thread_ptr = __omp_thread_create(i + 1, argc, microtask, varargs);
       thread_ptrs.push(thread_ptr);
     }
-    for (var i = 0; i < OpenMP.omp_num_threads; i++)
+    // main thread execution
+    try {
+      switch (argc) {
+        case 0:
+          asm.dynCall_vii(microtask, 0, 1);
+          break;
+        case 1:
+          asm.dynCall_viii(microtask, 0, 1, HEAP32[varargs >> 2]);
+          break
+        default: 
+        }
+    } catch (e) {
+        console.log('Exception: ' + e);
+    }
+
+    for (var i = 0; i < OpenMP.omp_num_threads - 1; i++)
       __omp_thread_join(thread_ptrs.pop());
 
     console.log(Atomics.load(HEAP32, OpenMP.omp_barrier_address >> 2));
