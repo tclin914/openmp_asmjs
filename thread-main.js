@@ -60,11 +60,14 @@ this.onmessage = function(e) {
       try {
         switch (e.data.argc) {
             case 0:
-              asm.dynCall_vii(e.data.microtask, selfThreadId, 1);          
+              asm.dynCall_vii(e.data.microtask, threadInfoStruct + 0, 1);          
               break;
             case 1:
-              asm.dynCall_viii(e.data.microtask, selfThreadId, 1, HEAP32[e.data.varargs >> 2]);
+              asm.dynCall_viii(e.data.microtask, threadInfoStruct + 0, 1, HEAP32[e.data.varargs >> 2]);
               break; 
+            case 2:
+              asm.dynCall_viiii(e.data.microtask, threadInfoStruct + 0, 1, HEAP32[e.data.varargs >> 2], 
+                      HEAP32[(e.data.varargs + 4) >> 2]);
             default:
                 
         }
