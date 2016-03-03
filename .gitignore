@@ -7,3 +7,8 @@ barrier/barrier.html
 barrier/barrier.js
 barrier/pthread-main.js
 barrier/barrier.ll
+
+critical/critical.html
+critical/critical.js
+critical/pthread-main.js
+critical/critical.ll
