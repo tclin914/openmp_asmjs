@@ -17,3 +17,8 @@ atomic/atomic.html
 atomic/atomic.js
 atomic/pthread-main.js
 atomic/atomic.ll
+
+master/master.html
+master/master.js
+master/pthread-main.js
+master/master.ll
