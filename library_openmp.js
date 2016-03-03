@@ -14,8 +14,9 @@ var LibraryOpenMP = {
       for (var i = 0; i < 216 >> 2; ++i) HEAPU32[(threadInfoStruct >> 2) + i] = 0;
     
       // set up thread infomation
-      Atomics.store(HEAPU32, (threadInfoStruct + 0) >> 2, 0); // threadStatus
-      Atomics.store(HEAPU32, (threadInfoStruct + 4) >> 2, 0); // threadExitCode
+      Atomics.store(HEAPU32, (threadInfoStruct + 0) >> 2, 0); // threadId
+      Atomics.store(HEAPU32, (threadInfoStruct + 4) >> 2, 0); // threadStatus
+      Atomics.store(HEAPU32, (threadInfoStruct + 8) >> 2, 0); // threadExitCode
 
       OpenMP.mainThreadBlock = threadInfoStruct; 
     },
@@ -27,7 +28,8 @@ var LibraryOpenMP = {
 
       var numWorkersLoaded = 0;
       for (var i = 0; i < numWorkers; ++i) {
-        var threadMainJS = '../thread-main.js';
+        // var threadMainJS = '../thread-main.js';
+        var threadMainJS = 'file:///Users/tclin/openmp_asmjs/thread-main.js';
         
         // if (typeof Module['locateFile'] === 'function') threadMainJS = Module['locateFile'](threadMainJS);
         
@@ -89,7 +91,7 @@ var LibraryOpenMP = {
     },
 
     threadExit: function() {
-      Atomics.store(HEAPU32, threadInfoStruct >> 2, 1);
+      Atomics.store(HEAPU32, (threadInfoStruct + 4) >> 2, 1); // threadStatus
       __omp_futex_wake(threadInfoStruct, 1);
     },
 
@@ -107,7 +109,7 @@ var LibraryOpenMP = {
     }
   },
 
-  _omp_spawn_thread: function(threadid, threadParams, argc, varargs) {
+  _omp_spawn_thread: function(threadId, threadParams, argc, varargs) {
     if (ENVIRONMENT_IS_WORKER || ENVIRONMENT_IS_PTHREAD) throw 'Internal Error! _spawn_thread() can only ever be called from main JS thread!';
 
     var worker = OpenMP.getNewWorker();
@@ -123,8 +125,9 @@ var LibraryOpenMP = {
     };
 
     // set up thread infomation
-    Atomics.store(HEAPU32, (thread.threadInfoStruct + 0) >> 2, 0); // threadStatus
-    Atomics.store(HEAPU32, (thread.threadInfoStruct + 4) >> 2, 0); // threadExitCode
+    Atomics.store(HEAPU32, (thread.threadInfoStruct + 0) >> 2, threadId); // threadId
+    Atomics.store(HEAPU32, (thread.threadInfoStruct + 4) >> 2, 0); // threadStatus
+    Atomics.store(HEAPU32, (thread.threadInfoStruct + 8) >> 2, 0); // threadExitCode
 
     worker.thread = thread;
 
@@ -134,7 +137,7 @@ var LibraryOpenMP = {
       argc: argc, 
       varargs: varargs,
       threadInfoStruct: threadParams.thread_ptr,
-      selfThreadId: threadid,
+      selfThreadId: threadId,
       stackBase: threadParams.stackBase,
       stackSize: threadParams.stackSize,
       omp_num_threads: OpenMP.omp_num_threads,
@@ -144,7 +147,7 @@ var LibraryOpenMP = {
   },
 
   _omp_thread_create__deps: ['_omp_spawn_thread'],
-  _omp_thread_create: function(threadid, argc, microtask, varargs) {
+  _omp_thread_create: function(threadId, argc, microtask, varargs) {
     if (typeof SharedArrayBuffer === 'undefined') {
       Module['printErr']('Current envrionment does not support SharedArrayBuffer, OpenMP are not availalbe!');
       return 11;
@@ -170,26 +173,26 @@ var LibraryOpenMP = {
       threadParams.cmd = 'spawnThread';
       postMessage(threadParams);
     } else {
-      __omp_spawn_thread(threadid, threadParams, argc, varargs); 
+      __omp_spawn_thread(threadId, threadParams, argc, varargs); 
       return threadInfoStruct;
     }
   },
 
   _omp_thread_join: function(thread_ptr) {
     for (;;) {
-      var threadStatus = Atomics.load(HEAPU32, thread_ptr >> 2);
+      var threadStatus = Atomics.load(HEAPU32, (thread_ptr + 4) >> 2);
       if (threadStatus == 1) {
         console.log('_omp_thread_join return');
         return; 
       }
       // if (!ENVIRONMENT_IS_PTHREAD) _emscripten_main_thread_process_queued_calls();
-      __omp_futex_wait(thread_ptr, threadStatus, 100);
+      __omp_futex_wait(thread_ptr + 4, threadStatus, 100);
     } 
   },
 
   _omp_futex_wait: function(addr, val, timeout) {
     if (addr <= 0 || addr > HEAP8.length || addr&3 != 0) {
-      console.log('Error: __omp_futex_wait abnomal wait address ' + addr + ' threadid = ' + selfThreadId);
+      console.log('Error: __omp_futex_wait abnomal wait address ' + addr + ' threadId = ' + selfThreadId);
     }
 
     if (ENVIRONMENT_IS_WORKER) {
@@ -263,10 +266,13 @@ var LibraryOpenMP = {
     try {
       switch (argc) {
         case 0:
-          asm.dynCall_vii(microtask, 0, 1);
+          asm.dynCall_vii(microtask, OpenMP.mainThreadBlock + 0, 1);
           break;
         case 1:
-          asm.dynCall_viii(microtask, 0, 1, HEAP32[varargs >> 2]);
+          asm.dynCall_viii(microtask, OpenMP.mainThreadBlock + 0, 1, HEAP32[varargs >> 2]);
+          break;
+        case 2:
+          asm.dynCall_viiii(microtask, OpenMP.mainThreadBlock + 0, 1, HEAP32[varargs >> 2], HEAP32[(varargs + 4) >> 2]);
           break
         default: 
         }
@@ -277,10 +283,9 @@ var LibraryOpenMP = {
     for (var i = 0; i < OpenMP.omp_num_threads - 1; i++)
       __omp_thread_join(thread_ptrs.pop());
 
-    console.log(Atomics.load(HEAP32, OpenMP.omp_barrier_address >> 2));
   },
 
-  __kmpc_barrier: function(loc, threadid) {
+  __kmpc_barrier: function(loc, threadId) {
     // load the number of the thread arriving barrier
     Atomics.add(HEAP32, OpenMP.omp_barrier_address >> 2, 1);
     for (;;) {
@@ -290,6 +295,26 @@ var LibraryOpenMP = {
        }
        __omp_futex_wait(OpenMP.omp_barrier_address, num, 100);
     }
+  },
+
+  // TODO:
+  __kmpc_critical: function(loc, threadId, crit) {
+  
+  },
+
+  // TODO:
+  __kmpc_end_critical: function(loc, threadId, crit) {
+  
+  },
+
+  __kmpc_master: function(loc, threadId) {
+    if (threadId == 0) return 1;
+    return 0;
+  },
+
+  // TODO:
+  __kmpc_end_master: function(loc, threadId) {
+  
   }
 };
 
