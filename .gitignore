@@ -12,3 +12,8 @@ critical/critical.html
 critical/critical.js
 critical/pthread-main.js
 critical/critical.ll
+
+atomic/atomic.html
+atomic/atomic.js
+atomic/pthread-main.js
+atomic/atomic.ll
